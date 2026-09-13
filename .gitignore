@@ -1,0 +1,40 @@
+# ---------------- Python ----------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ---------------- Virtual Environments ----------------
+venv/
+.env
+.env.local
+
+# ---------------- Secrets ----------------
+secrets.toml
+.streamlit/secrets.toml
+
+# ---------------- Screenshots (for HF deployment) ----------------
+screenshots/
+
+# ---------------- Databases ----------------
+*.sqlite3
+*.db
+*.bin
+chroma/
+wellness_cur/chroma/
+
+# ---------------- Streamlit / HuggingFace temp ----------------
+.streamlit/
+.cache/
+.ipynb_checkpoints/
+
+# ---------------- Logs ----------------
+*.log
+
+# ---------------- OS Files ----------------
+.DS_Store
+Thumbs.db
+
+# ---------------- IDE ----------------
+.vscode/
+.idea/

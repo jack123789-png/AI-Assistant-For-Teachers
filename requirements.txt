@@ -1,0 +1,12 @@
+streamlit
+openai
+pandas
+matplotlib
+seaborn
+pypdf
+python-docx
+python-pptx
+python-dotenv
+altair
+tiktoken
+openpyxl
