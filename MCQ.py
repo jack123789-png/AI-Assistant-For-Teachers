@@ -384,33 +384,62 @@ def MCQ():
 
     st.markdown("**四、圖形題（程式繪圖，不花 token）**")
 
-    use_nl = st.checkbox("數線", value=False)
+    FIG_PRESETS = {
+        "自訂（不套用）": {},
+        "國小中年級（4年級）": {
+            "fig_nl_on": True, "fig_nl_lo": 0, "fig_nl_hi": 10, "fig_nl_mark": 4,
+            "fig_tr_on": False, "fig_ln_on": False,
+            "fig_bar_on": True, "fig_bar_title": "班級圖書統計",
+            "fig_bar_data": "傳記:12,故事:20,漫畫:15",
+        },
+        "國小高年級（5-6年級）": {
+            "fig_nl_on": True, "fig_nl_lo": -10, "fig_nl_hi": 10, "fig_nl_mark": -3,
+            "fig_tr_on": True, "fig_tr_a": 50, "fig_tr_b": 60,
+            "fig_ln_on": False,
+            "fig_bar_on": True, "fig_bar_title": "資源回收量統計",
+            "fig_bar_data": "五甲:30,五乙:26,五丙:32",
+        },
+        "國中（7-9年級）": {
+            "fig_nl_on": True, "fig_nl_lo": -10, "fig_nl_hi": 10, "fig_nl_mark": -4,
+            "fig_ln_on": True, "fig_ln_a": 2, "fig_ln_b": -3,
+            "fig_tr_on": True, "fig_tr_a": 45, "fig_tr_b": 75,
+            "fig_bar_on": True, "fig_bar_title": "七年級段考平均",
+            "fig_bar_data": "國文:88,英語:92,數學:85",
+        },
+    }
+    preset = st.selectbox("年級預設（一鍵帶入參數）", list(FIG_PRESETS.keys()))
+    if st.button("套用預設"):
+        for _k, _v in FIG_PRESETS[preset].items():
+            st.session_state[_k] = _v
+        st.rerun()
+
+    use_nl = st.checkbox("數線", key="fig_nl_on")
     nl_lo, nl_hi, nl_mark = -5, 5, 3
     if use_nl:
         n1, n2, n3 = st.columns(3)
-        nl_lo = n1.number_input("數線最小值", value=-5, step=1)
-        nl_hi = n2.number_input("數線最大值", value=5, step=1)
-        nl_mark = n3.number_input("A 點位置", value=3, step=1)
+        nl_lo = n1.number_input("數線最小值", value=-5, step=1, key="fig_nl_lo")
+        nl_hi = n2.number_input("數線最大值", value=5, step=1, key="fig_nl_hi")
+        nl_mark = n3.number_input("A 點位置", value=3, step=1, key="fig_nl_mark")
 
-    use_ln = st.checkbox("一次函數圖形", value=False)
+    use_ln = st.checkbox("一次函數圖形", key="fig_ln_on")
     ln_a, ln_b = 2, -1
     if use_ln:
         l1, l2 = st.columns(2)
-        ln_a = l1.number_input("a（斜率）", value=2, step=1)
-        ln_b = l2.number_input("b（y 截距）", value=-1, step=1)
+        ln_a = l1.number_input("a（斜率）", value=2, step=1, key="fig_ln_a")
+        ln_b = l2.number_input("b（y 截距）", value=-1, step=1, key="fig_ln_b")
 
-    use_tr = st.checkbox("三角形角度", value=False)
+    use_tr = st.checkbox("三角形角度", key="fig_tr_on")
     tr_a, tr_b = 50, 60
     if use_tr:
         t1, t2 = st.columns(2)
-        tr_a = t1.number_input("角 A（度）", min_value=1, max_value=178, value=50, step=1)
-        tr_b = t2.number_input("角 B（度）", min_value=1, max_value=178, value=60, step=1)
+        tr_a = t1.number_input("角 A（度）", min_value=1, max_value=178, value=50, step=1, key="fig_tr_a")
+        tr_b = t2.number_input("角 B（度）", min_value=1, max_value=178, value=60, step=1, key="fig_tr_b")
 
-    use_bar = st.checkbox("統計長條圖", value=False)
+    use_bar = st.checkbox("統計長條圖", key="fig_bar_on")
     bar_title, bar_data = "資源回收量統計", "五甲:30,五乙:26,五丙:32"
     if use_bar:
-        bar_title = st.text_input("長條圖標題", value="資源回收量統計")
-        bar_data = st.text_input("資料（名稱:數值，逗號分隔）", value="五甲:30,五乙:26,五丙:32")
+        bar_title = st.text_input("長條圖標題", value="資源回收量統計", key="fig_bar_title")
+        bar_data = st.text_input("資料（名稱:數值，逗號分隔）", value="五甲:30,五乙:26,五丙:32", key="fig_bar_data")
 
     # ---------- GENERATE ----------
     if st.button("開始出題"):
