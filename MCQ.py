@@ -4,6 +4,8 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from io import BytesIO
 from ai import ask_ai
+import figures
+from docx.shared import Inches
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -229,7 +231,7 @@ def _answer_of(question):
 
 
 # ---------------- 混合卷 DOCX ----------------
-def generate_mixed_docx(sections, heading1, heading2):
+def generate_mixed_docx(sections, heading1, heading2, figs=None):
     doc = Document()
     h1 = doc.add_heading(heading1, level=0)
     h1.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -256,6 +258,14 @@ def generate_mixed_docx(sections, heading1, heading2):
                 doc.add_paragraph(line)
             doc.add_paragraph("")
 
+    if figs:
+        doc.add_heading("四、圖形題", level=1)
+        for i, item in enumerate(figs):
+            doc.add_paragraph(f"圖{i + 1}：{item['question']}")
+            item["image"].seek(0)
+            doc.add_picture(item["image"], width=Inches(5))
+            doc.add_paragraph("")
+
     doc.add_page_break()
     doc.add_heading("參考答案", level=1)
     for kind in ["choice", "fill", "app"]:
@@ -264,6 +274,10 @@ def generate_mixed_docx(sections, heading1, heading2):
         doc.add_heading(titles[kind], level=2)
         for i, question in enumerate(sections[kind]):
             doc.add_paragraph(f"第{i + 1}題：{_answer_of(question)}")
+    if figs:
+        doc.add_heading("四、圖形題", level=2)
+        for i, item in enumerate(figs):
+            doc.add_paragraph(f"圖{i + 1}：{item['answer']}")
 
     buffer = BytesIO()
     doc.save(buffer)
@@ -368,6 +382,36 @@ def MCQ():
 
     show_answers = st.checkbox("顯示答案", value=True)
 
+    st.markdown("**四、圖形題（程式繪圖，不花 token）**")
+
+    use_nl = st.checkbox("數線", value=False)
+    nl_lo, nl_hi, nl_mark = -5, 5, 3
+    if use_nl:
+        n1, n2, n3 = st.columns(3)
+        nl_lo = n1.number_input("數線最小值", value=-5, step=1)
+        nl_hi = n2.number_input("數線最大值", value=5, step=1)
+        nl_mark = n3.number_input("A 點位置", value=3, step=1)
+
+    use_ln = st.checkbox("一次函數圖形", value=False)
+    ln_a, ln_b = 2, -1
+    if use_ln:
+        l1, l2 = st.columns(2)
+        ln_a = l1.number_input("a（斜率）", value=2, step=1)
+        ln_b = l2.number_input("b（y 截距）", value=-1, step=1)
+
+    use_tr = st.checkbox("三角形角度", value=False)
+    tr_a, tr_b = 50, 60
+    if use_tr:
+        t1, t2 = st.columns(2)
+        tr_a = t1.number_input("角 A（度）", min_value=1, max_value=178, value=50, step=1)
+        tr_b = t2.number_input("角 B（度）", min_value=1, max_value=178, value=60, step=1)
+
+    use_bar = st.checkbox("統計長條圖", value=False)
+    bar_title, bar_data = "資源回收量統計", "五甲:30,五乙:26,五丙:32"
+    if use_bar:
+        bar_title = st.text_input("長條圖標題", value="資源回收量統計")
+        bar_data = st.text_input("資料（名稱:數值，逗號分隔）", value="五甲:30,五乙:26,五丙:32")
+
     # ---------- GENERATE ----------
     if st.button("開始出題"):
 
@@ -391,12 +435,52 @@ def MCQ():
                 st.code(r or "(空白回應)")
             return
 
+        figs = []
+
+        if use_nl:
+            if nl_lo >= nl_hi or not (nl_lo <= nl_mark <= nl_hi):
+                st.error("數線範圍或 A 點位置不合理。")
+                return
+            img, ans = figures.make_number_line(nl_lo, nl_hi, nl_mark)
+            figs.append({"question": "如圖，數線上 A 點代表的數是多少？",
+                         "answer": ans, "image": img})
+
+        if use_ln:
+            img, intercept, y2 = figures.make_linear(ln_a, ln_b)
+            figs.append({"question": f"如圖為 y = ax + b 的圖形，求 a 與 b。",
+                         "answer": f"a = {ln_a}；b = {ln_b}",
+                         "image": img})
+
+        if use_tr:
+            if tr_a + tr_b >= 180:
+                st.error("兩角之和必須小於 180 度。")
+                return
+            img, ans = figures.make_triangle(tr_a, tr_b)
+            figs.append({"question": f"如圖，∠A = {tr_a}°，∠B = {tr_b}°，求∠C 是幾度？",
+                         "answer": f"{ans} 度", "image": img})
+
+        if use_bar:
+            try:
+                items = []
+                for part in bar_data.split(","):
+                    name, val = part.split(":")
+                    items.append((name.strip(), int(val.strip())))
+                assert items
+            except Exception:
+                st.error("長條圖資料格式錯誤，請用「名稱:數值，逗號分隔」。")
+                return
+            img, best, total = figures.make_bar(bar_title, items)
+            figs.append({"question": f"如圖「{bar_title}」，數量最多的是哪一個？總數是多少？",
+                         "answer": f"{best}；{total}", "image": img})
+
         st.session_state["mixed_quiz"] = sections
+        st.session_state["fig_quiz"] = figs
 
         st.session_state["mixed_docx"] = generate_mixed_docx(
             sections,
             institute_name or "學校",
             f"{quiz_title or '考卷'}（{level}）",
+            figs=figs,
         )
 
     # ---------- DISPLAY ----------
@@ -437,6 +521,16 @@ def MCQ():
                         st.write(line)
                 st.write("")
 
+        if st.session_state.get("fig_quiz"):
+            st.subheader("四、圖形題")
+            for i, item in enumerate(st.session_state["fig_quiz"]):
+                st.markdown(f"**圖{i + 1}：{item['question']}**")
+                item["image"].seek(0)
+                st.image(item["image"], width=600)
+                if show_answers:
+                    st.success(item["answer"])
+                st.write("")
+
         # ---------- ANSWER KEY ----------
         if show_answers:
             st.subheader("參考答案")
@@ -446,6 +540,11 @@ def MCQ():
                 st.write(f"**{titles[kind]}**")
                 for i, question in enumerate(sections[kind]):
                     st.write(f"第{i + 1}題：{_answer_of(question)}")
+
+            if st.session_state.get("fig_quiz"):
+                st.write("**四、圖形題**")
+                for i, item in enumerate(st.session_state["fig_quiz"]):
+                    st.write(f"圖{i + 1}：{item['answer']}")
 
         # ---------- DOWNLOAD ----------
         if "mixed_docx" in st.session_state:
