@@ -363,7 +363,9 @@ def MCQ():
 
     with col1:
         institute_name = st.text_input("學校／補習班名稱")
-        topic = st.text_input("出題範圍（例：國小五年級 公因數與公倍數）")
+        topic = st.text_input("出題範圍（例：國小五年級 公因數與公倍數）",
+                                placeholder="越細越不重複，例：短除法兩步驟、數字50到100、分東西情境",
+                                help="模板：年級＋單元＋題型＋數字範圍＋情境。例：「國中七年級 一元一次方程式計算，係數整數、解為整數」")
 
     with col2:
         quiz_title = st.text_input("考卷標題")
