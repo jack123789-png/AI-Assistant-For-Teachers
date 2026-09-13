@@ -83,6 +83,194 @@ def create_difficulty_mix(total):
     return difficulties
 
 
+DIFF_GUIDE = {
+    "初階": "基本觀念、單一步驟，數字小（以一、二位數為主），直接套用定義或列舉",
+    "中階": "兩步驟綜合，需先計算再判斷，數字中等，含完整計算過程",
+    "進階": "生活情境應用，需自行判斷方法，數字稍大，可含干擾敘述",
+}
+
+
+def _level_text(level):
+    return f"{level}（{DIFF_GUIDE.get(level, '')}）"
+
+
+# ---------------- 填充題 ----------------
+def generate_single_fill(topic, level, num):
+    system_prompt = "You are an expert educational assessment designer."
+    user_prompt = f"""
+Generate ONE fill-in-the-blank question in Traditional Chinese (Taiwan).
+
+Topic: {topic}
+Level: {_level_text(level)}
+
+Rules:
+- 題目敘述後用 ___ 留空格作答
+- 數字大小配合程度
+- 最後一行只給答案
+
+Format EXACTLY:
+
+F{num}: 題目敘述 ___
+答案：xxx
+"""
+    return ("fill", num, ask_ai(system_prompt, user_prompt))
+
+
+def format_fill(quiz_text):
+    lines = quiz_text.split("\n")
+    out, cur = [], []
+    for line in lines:
+        if re.match(r"^F\d+:", line):
+            if cur:
+                out.append(cur)
+            cur = [line]
+        elif line.startswith("答案：") or line.startswith("答案:"):
+            if cur:
+                cur.append(line)
+        elif line.strip() and cur:
+            cur[-1] = cur[-1] + line.strip()
+    if cur:
+        out.append(cur)
+    return out
+
+
+# ---------------- 應用題 ----------------
+def generate_single_app(topic, level, num):
+    system_prompt = "You are an expert educational assessment designer."
+    user_prompt = f"""
+Generate ONE word problem in Traditional Chinese (Taiwan) with daily-life context.
+
+Topic: {topic}
+Level: {_level_text(level)}
+
+Rules:
+- 生活化情境，敘述清楚
+- 數字大小配合程度
+- 最後一段給計算過程與答案
+
+Format EXACTLY:
+
+P{num}: 題目敘述
+解答：計算過程與答案
+"""
+    return ("app", num, ask_ai(system_prompt, user_prompt))
+
+
+def format_app(quiz_text):
+    lines = quiz_text.split("\n")
+    out, cur = [], []
+    for line in lines:
+        if re.match(r"^P\d+:", line):
+            if cur:
+                out.append(cur)
+            cur = [line]
+        elif line.startswith("解答：") or line.startswith("解答:"):
+            if cur:
+                cur.append(line)
+        elif line.strip() and cur:
+            cur[-1] = cur[-1] + line.strip()
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _choice_task(topic, level, num):
+    diff_map = {"初階": "Beginner", "中階": "Intermediate", "進階": "Expert"}
+    return ("choice", num,
+            generate_single_mcq(f"{topic}（程度：{_level_text(level)}）",
+                                diff_map.get(level, "Intermediate"), num))
+
+
+# ---------------- 混合平行出題 ----------------
+def generate_mixed_parallel(topic, level, n_choice, n_fill, n_app):
+    tasks = []
+    tasks += [("choice", i) for i in range(1, n_choice + 1)]
+    tasks += [("fill", i) for i in range(1, n_fill + 1)]
+    tasks += [("app", i) for i in range(1, n_app + 1)]
+    results = {"choice": [], "fill": [], "app": []}
+    raws = []
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = []
+        for kind, num in tasks:
+            if kind == "choice":
+                futures.append(executor.submit(_choice_task, topic, level, num))
+            elif kind == "fill":
+                futures.append(executor.submit(
+                    lambda n=num: ("fill", n, generate_single_fill(topic, level, n)[2])))
+            else:
+                futures.append(executor.submit(
+                    lambda n=num: ("app", n, generate_single_app(topic, level, n)[2])))
+        for future in as_completed(futures):
+            kind, num, text = future.result()
+            raws.append(text)
+            if kind == "choice":
+                parsed = format_quiz(text)
+            elif kind == "fill":
+                parsed = format_fill(text)
+            else:
+                parsed = format_app(text)
+            for q in parsed:
+                results[kind].append((num, q))
+    for kind in results:
+        results[kind].sort(key=lambda x: x[0])
+        results[kind] = [q for _, q in results[kind]]
+    return results, raws
+
+
+def _answer_of(question):
+    for line in question:
+        if line.startswith("Answer:"):
+            return line.split(": ", 1)[1] if ": " in line else line[7:]
+        if line.startswith("答案：") or line.startswith("答案:"):
+            return line[3:]
+        if line.startswith("解答：") or line.startswith("解答:"):
+            return line[3:]
+    return ""
+
+
+# ---------------- 混合卷 DOCX ----------------
+def generate_mixed_docx(sections, heading1, heading2):
+    doc = Document()
+    h1 = doc.add_heading(heading1, level=0)
+    h1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    h2 = doc.add_heading(heading2, level=2)
+    h2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    doc.add_paragraph("姓名：")
+    doc.add_paragraph("座號：")
+    doc.add_paragraph("班級：")
+    doc.add_paragraph("組別：")
+    doc.add_paragraph("")
+
+    titles = {"choice": "一、選擇題", "fill": "二、填充題", "app": "三、應用題"}
+    for kind in ["choice", "fill", "app"]:
+        if not sections.get(kind):
+            continue
+        doc.add_heading(titles[kind], level=1)
+        for question in sections[kind]:
+            for line in question:
+                if (line.startswith("Answer:") or line.startswith("答案：")
+                        or line.startswith("答案:") or line.startswith("解答：")
+                        or line.startswith("解答:")):
+                    continue
+                doc.add_paragraph(line)
+            doc.add_paragraph("")
+
+    doc.add_page_break()
+    doc.add_heading("參考答案", level=1)
+    for kind in ["choice", "fill", "app"]:
+        if not sections.get(kind):
+            continue
+        doc.add_heading(titles[kind], level=2)
+        for i, question in enumerate(sections[kind]):
+            doc.add_paragraph(f"第{i + 1}題：{_answer_of(question)}")
+
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
 # ---------------- PARALLEL QUIZ GENERATION ----------------
 def generate_quiz_parallel(topic, difficulty, num_questions, balanced):
 
@@ -155,77 +343,66 @@ def generate_docx(quiz, heading1, heading2):
 # ---------------- STREAMLIT APP ----------------
 def MCQ():
 
-    st.subheader("AI 出題產生器")
+    st.subheader("AI 混合卷產生器")
 
     col1, col2 = st.columns(2)
 
     with col1:
         institute_name = st.text_input("學校／補習班名稱")
-        topic = st.text_input("出題範圍（例：國一 一元一次方程式）")
+        topic = st.text_input("出題範圍（例：國小五年級 公因數與公倍數）")
 
     with col2:
         quiz_title = st.text_input("考卷標題")
+        level = st.selectbox("難度", ["初階", "中階", "進階"])
 
-        DIFF_ZH = {"Beginner": "初級", "Intermediate": "中級", "Expert": "進階"}
-        difficulty = st.selectbox(
-            "難易度",
-            ["Beginner", "Intermediate", "Expert"],
-            format_func=lambda k: DIFF_ZH.get(k, k),
-        )
+    c1, c2, c3 = st.columns(3)
 
-    num_questions = st.number_input(
-        "題數",
-        min_value=1,
-        max_value=20,
-        value=5
-    )
+    with c1:
+        n_choice = st.number_input("選擇題數", min_value=0, max_value=10, value=3)
 
-    balanced = st.checkbox(
-        "難易度混搭（初／中／高自動分配）",
-        value=False
-    )
+    with c2:
+        n_fill = st.number_input("填充題數", min_value=0, max_value=10, value=3)
+
+    with c3:
+        n_app = st.number_input("應用題數", min_value=0, max_value=10, value=2)
 
     show_answers = st.checkbox("顯示答案", value=True)
 
-    # ---------- GENERATE QUIZ ----------
+    # ---------- GENERATE ----------
     if st.button("開始出題"):
 
         if topic.strip() == "":
             st.error("請先輸入出題範圍。")
             return
 
-        with st.spinner("AI 出題中……"):
-
-            raw_questions = generate_quiz_parallel(
-                topic,
-                difficulty,
-                num_questions,
-                balanced
-            )
-
-        formatted_quiz = []
-
-        for q in raw_questions:
-            formatted_quiz.extend(format_quiz(q))
-
-        if not formatted_quiz:
-            st.error("AI 沒有回傳可用題目，原始回應如下（拿去對金鑰或額度）：")
-            for q in raw_questions:
-                st.code(q or "(空白回應)")
+        if n_choice + n_fill + n_app == 0:
+            st.error("至少要出一題。")
             return
 
-        st.session_state["quiz"] = formatted_quiz
+        with st.spinner("AI 出題中……"):
+            sections, raws = generate_mixed_parallel(
+                topic, level, n_choice, n_fill, n_app)
 
-        docx_content = generate_docx(
-            formatted_quiz,
-            institute_name or "Institute",
-            quiz_title or "Quiz"
+        total = sum(len(sections[k]) for k in sections)
+
+        if total == 0:
+            st.error("AI 沒有回傳可用題目，原始回應如下（拿去對金鑰或額度）：")
+            for r in raws:
+                st.code(r or "(空白回應)")
+            return
+
+        st.session_state["mixed_quiz"] = sections
+
+        st.session_state["mixed_docx"] = generate_mixed_docx(
+            sections,
+            institute_name or "學校",
+            f"{quiz_title or '考卷'}（{level}）",
         )
 
-        st.session_state["docx_content"] = docx_content
+    # ---------- DISPLAY ----------
+    if "mixed_quiz" in st.session_state:
 
-    # ---------- DISPLAY QUIZ ----------
-    if "quiz" in st.session_state:
+        sections = st.session_state["mixed_quiz"]
 
         st.divider()
 
@@ -236,47 +413,45 @@ def MCQ():
             st.write(f"**{quiz_title}**")
 
         st.write("---")
-
         st.write("姓名：")
         st.write("座號：")
         st.write("班級：")
         st.write("組別：")
         st.write("")
 
-        for question in st.session_state["quiz"]:
+        titles = {"choice": "一、選擇題", "fill": "二、填充題", "app": "三、應用題"}
 
-            st.markdown(f"**{question[0]}**")
-
-            for line in question[1:]:
-
-                if line.startswith("Answer:"):
-
-                    if show_answers:
-                        st.success(f"正解：{line.split(': ')[1]}")
-
-                else:
-                    st.write(line)
-
-            st.write("")
+        for kind in ["choice", "fill", "app"]:
+            if not sections.get(kind):
+                continue
+            st.subheader(titles[kind])
+            for question in sections[kind]:
+                st.markdown(f"**{question[0]}**")
+                for line in question[1:]:
+                    if (line.startswith("Answer:") or line.startswith("答案：")
+                            or line.startswith("答案:") or line.startswith("解答：")
+                            or line.startswith("解答:")):
+                        if show_answers:
+                            st.success(line)
+                    else:
+                        st.write(line)
+                st.write("")
 
         # ---------- ANSWER KEY ----------
         if show_answers:
-
             st.subheader("參考答案")
-
-            for i, question in enumerate(st.session_state["quiz"]):
-
-                for line in question:
-                    if line.startswith("Answer:"):
-                        ans = line.split(": ")[1]
-                        st.write(f"Q{i+1}: {ans}")
+            for kind in ["choice", "fill", "app"]:
+                if not sections.get(kind):
+                    continue
+                st.write(f"**{titles[kind]}**")
+                for i, question in enumerate(sections[kind]):
+                    st.write(f"第{i + 1}題：{_answer_of(question)}")
 
         # ---------- DOWNLOAD ----------
-        if "docx_content" in st.session_state:
-
+        if "mixed_docx" in st.session_state:
             st.download_button(
                 label="下載考卷（DOCX）",
-                data=st.session_state["docx_content"],
-                file_name="quiz.docx",
+                data=st.session_state["mixed_docx"],
+                file_name="mixed_quiz.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
