@@ -208,6 +208,12 @@ def MCQ():
         for q in raw_questions:
             formatted_quiz.extend(format_quiz(q))
 
+        if not formatted_quiz:
+            st.error("AI 沒有回傳可用題目，原始回應如下（拿去對金鑰或額度）：")
+            for q in raw_questions:
+                st.code(q or "(空白回應)")
+            return
+
         st.session_state["quiz"] = formatted_quiz
 
         docx_content = generate_docx(
